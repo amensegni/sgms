@@ -1,270 +1,364 @@
-import { Schema, Effect } from "effect";
-import {
-  Program,
-  Model,
-  Message,
-  Command,
-  View,
-  html,
-  text,
-} from "foldkit";
+import { Effect, Schema } from "effect";
+import { Command, Runtime, Update } from "foldkit";
+import { defineMessageUnion } from "foldkit/message";
+import type { HtmlBuilder } from "foldkit/html";
 
-// --- Domain types ---
-
-export const StudentSchema = Schema.Struct({
+const StudentSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   email: Schema.String,
 });
-export type Student = typeof StudentSchema.Type;
+type Student = typeof StudentSchema.Type;
 
-export const GradeSchema = Schema.Struct({
+const CourseSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  code: Schema.String,
+});
+type Course = typeof CourseSchema.Type;
+
+const GradeSchema = Schema.Struct({
   id: Schema.String,
   studentId: Schema.String,
   courseId: Schema.String,
   value: Schema.Number,
   letter: Schema.optional(Schema.String),
 });
-export type Grade = typeof GradeSchema.Type;
+type Grade = typeof GradeSchema.Type;
 
-// --- Model ---
-
-export interface AppModel {
-  students: Student[];
-  grades: Grade[];
-  selectedStudentId: string | null;
-  newStudentName: string;
-  newStudentEmail: string;
-  newGradeValue: string | null;
-  newGradeCourse: string | null;
-  status: "idle" | "loading" | "success" | "error";
-  error: string | null;
-}
+export const AppModelSchema = Schema.Struct({
+  students: Schema.Array(StudentSchema),
+  courses: Schema.Array(CourseSchema),
+  grades: Schema.Array(GradeSchema),
+  selectedStudentId: Schema.NullOr(Schema.String),
+  studentName: Schema.String,
+  studentEmail: Schema.String,
+  courseName: Schema.String,
+  courseCode: Schema.String,
+  gradeValue: Schema.String,
+  gradeCourseId: Schema.String,
+  status: Schema.Literals(["idle", "loading"]),
+  error: Schema.NullOr(Schema.String),
+});
+type AppModel = typeof AppModelSchema.Type;
 
 export const initialModel: AppModel = {
   students: [],
+  courses: [],
   grades: [],
   selectedStudentId: null,
-  newStudentName: "",
-  newStudentEmail: "",
-  newGradeValue: null,
-  newGradeCourse: null,
-  status: "idle",
+  studentName: "",
+  studentEmail: "",
+  courseName: "",
+  courseCode: "",
+  gradeValue: "",
+  gradeCourseId: "",
+  status: "loading",
   error: null,
 };
 
-// --- Messages ---
-
-export const Msg = Schema.TaggedUnion("type", {
-  AddStudent: Schema.Struct({ type: Schema.literal("AddStudent"), name: Schema.String, email: Schema.String }),
-  SelectStudent: Schema.Struct({ type: Schema.literal("SelectStudent"), id: Schema.String }),
-  RecordGrade: Schema.Struct({ type: Schema.literal("RecordGrade"), value: Schema.Number, course: Schema.String }),
-  SetNewStudentName: Schema.Struct({ type: Schema.literal("SetNewStudentName"), value: Schema.String }),
-  SetNewStudentEmail: Schema.Struct({ type: Schema.literal("SetNewStudentEmail"), value: Schema.String }),
-  SetNewGradeValue: Schema.Struct({ type: Schema.literal("SetNewGradeValue"), value: Schema.String }),
-  SetNewGradeCourse: Schema.Struct({ type: Schema.literal("SetNewGradeCourse"), value: Schema.String }),
-  StudentAdded: Schema.Struct({ type: Schema.literal("StudentAdded"), student: StudentSchema }),
-  GradeRecorded: Schema.Struct({ type: Schema.literal("GradeRecorded"), grade: GradeSchema }),
-  OperationFailed: Schema.Struct({ type: Schema.literal("OperationFailed"), message: Schema.String }),
+export const Message = defineMessageUnion({
+  StudentNameChanged: { value: Schema.String },
+  StudentEmailChanged: { value: Schema.String },
+  CourseNameChanged: { value: Schema.String },
+  CourseCodeChanged: { value: Schema.String },
+  GradeValueChanged: { value: Schema.String },
+  GradeCourseChanged: { value: Schema.String },
+  StudentSelected: { id: Schema.String },
+  AddStudentClicked: {},
+  AddCourseClicked: {},
+  RecordGradeClicked: {},
+  DataLoaded: {
+    students: Schema.Array(StudentSchema),
+    courses: Schema.Array(CourseSchema),
+  },
+  GradesLoaded: { grades: Schema.Array(GradeSchema) },
+  StudentCreated: { student: StudentSchema },
+  CourseCreated: { course: CourseSchema },
+  GradeCreated: { grade: GradeSchema },
+  OperationFailed: { message: Schema.String },
 });
-export type AppMessage = typeof Msg.Type;
+type AppMessage = typeof Message.Type;
 
-// --- Commands ---
-
-const addStudentCmd = (name: string, email: string): Command.Command<AppMessage> =>
-  Command.async("AddStudent", (resume) => {
-    const id = crypto.randomUUID();
-    resume(Effect.succeed({ type: "StudentAdded", student: { id, name, email } }));
+const requestJson = <S extends Schema.ConstraintDecoder<unknown>>(
+  path: string,
+  schema: S,
+  init?: RequestInit
+) =>
+  Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(path, {
+        ...init,
+        headers: { "content-type": "application/json", ...init?.headers },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => undefined) as { error?: string; message?: string } | undefined;
+        throw new Error(body?.message ?? body?.error ?? `Request failed (${response.status})`);
+      }
+      return Schema.decodeUnknownSync(schema)(await response.json());
+    },
+    catch: (cause) => cause instanceof Error ? cause : new Error(String(cause)),
   });
 
-const recordGradeCmd = (studentId: string, value: number, course: string): Command.Command<AppMessage> =>
-  Command.async("RecordGrade", (resume) => {
-    const id = crypto.randomUUID();
-    const letter = value >= 90 ? "A" : value >= 80 ? "B" : value >= 70 ? "C" : value >= 60 ? "D" : "F";
-    resume(Effect.succeed({ type: "GradeRecorded", grade: { id, studentId, courseId: course, value, letter } }));
+const commandResult = <A, M extends AppMessage>(
+  effect: Effect.Effect<A, Error>,
+  succeed: (value: A) => M
+): Effect.Effect<M | ReturnType<typeof Message.OperationFailed>> =>
+  Effect.match(effect, {
+    onFailure: (error) => Message.OperationFailed({ message: error.message }),
+    onSuccess: succeed,
   });
 
-// --- Update ---
+export const LoadData = Command.define("LoadData", {
+  messages: [Message.DataLoaded, Message.OperationFailed],
+  execute: commandResult(
+    Effect.all([
+      requestJson("/api/students", Schema.Array(StudentSchema)),
+      requestJson("/api/courses", Schema.Array(CourseSchema)),
+    ]),
+    ([students, courses]) => Message.DataLoaded({ students, courses })
+  ),
+});
 
-export const update = (model: AppModel, message: AppMessage): Model.UpdateReturn<AppModel, AppMessage> => {
-  switch (message.type) {
-    case "SetNewStudentName":
-      return { model: { ...model, newStudentName: message.value, error: null } };
+export const LoadGrades = Command.define("LoadGrades", {
+  args: { studentId: Schema.String },
+  messages: [Message.GradesLoaded, Message.OperationFailed],
+  execute: ({ studentId }) =>
+    commandResult(
+      requestJson(
+        `/api/students/${encodeURIComponent(studentId)}/grades`,
+        Schema.Array(GradeSchema)
+      ),
+      (grades) => Message.GradesLoaded({ grades })
+    ),
+});
 
-    case "SetNewStudentEmail":
-      return { model: { ...model, newStudentEmail: message.value, error: null } };
+export const CreateStudent = Command.define("CreateStudent", {
+  args: { name: Schema.String, email: Schema.String },
+  messages: [Message.StudentCreated, Message.OperationFailed],
+  execute: ({ name, email }) =>
+    commandResult(
+      requestJson("/api/students", StudentSchema, {
+        method: "POST",
+        body: JSON.stringify({ name, email }),
+      }),
+      (student) => Message.StudentCreated({ student })
+    ),
+});
 
-    case "SetNewGradeValue":
-      return { model: { ...model, newGradeValue: message.value, error: null } };
+export const CreateCourse = Command.define("CreateCourse", {
+  args: { name: Schema.String, code: Schema.String },
+  messages: [Message.CourseCreated, Message.OperationFailed],
+  execute: ({ name, code }) =>
+    commandResult(
+      requestJson("/api/courses", CourseSchema, {
+        method: "POST",
+        body: JSON.stringify({ name, code }),
+      }),
+      (course) => Message.CourseCreated({ course })
+    ),
+});
 
-    case "SetNewGradeCourse":
-      return { model: { ...model, newGradeCourse: message.value, error: null } };
+export const RecordGrade = Command.define("RecordGrade", {
+  args: { studentId: Schema.String, courseId: Schema.String, value: Schema.Number },
+  messages: [Message.GradeCreated, Message.OperationFailed],
+  execute: ({ studentId, courseId, value }) =>
+    commandResult(
+      requestJson("/api/grades", GradeSchema, {
+        method: "POST",
+        body: JSON.stringify({ studentId, courseId, value }),
+      }),
+      (grade) => Message.GradeCreated({ grade })
+    ),
+});
 
-    case "SelectStudent":
-      return { model: { ...model, selectedStudentId: message.id, error: null } };
+export const init: Runtime.ApplicationInit<AppModel, AppMessage> = () => ({
+  model: initialModel,
+  commands: [LoadData()],
+});
 
-    case "AddStudent":
+export const update = (
+  model: AppModel,
+  message: AppMessage
+): Update.Return<AppModel, AppMessage> => {
+  switch (message._tag) {
+    case "StudentNameChanged":
+      return { model: { ...model, studentName: message.value, error: null } };
+    case "StudentEmailChanged":
+      return { model: { ...model, studentEmail: message.value, error: null } };
+    case "CourseNameChanged":
+      return { model: { ...model, courseName: message.value, error: null } };
+    case "CourseCodeChanged":
+      return { model: { ...model, courseCode: message.value, error: null } };
+    case "GradeValueChanged":
+      return { model: { ...model, gradeValue: message.value, error: null } };
+    case "GradeCourseChanged":
+      return { model: { ...model, gradeCourseId: message.value, error: null } };
+    case "StudentSelected":
       return {
-        model: { ...model, status: "loading" },
-        commands: [addStudentCmd(message.name, message.email)],
+        model: { ...model, selectedStudentId: message.id, grades: [], error: null },
+        commands: [LoadGrades({ studentId: message.id })],
       };
-
-    case "RecordGrade":
-      if (!model.selectedStudentId) {
-        return { model: { ...model, error: "No student selected" } };
+    case "AddStudentClicked":
+      return {
+        model: { ...model, status: "loading", error: null },
+        commands: [CreateStudent({ name: model.studentName, email: model.studentEmail })],
+      };
+    case "AddCourseClicked":
+      return {
+        model: { ...model, status: "loading", error: null },
+        commands: [CreateCourse({ name: model.courseName, code: model.courseCode })],
+      };
+    case "RecordGradeClicked": {
+      const studentId = model.selectedStudentId;
+      const value = Number(model.gradeValue);
+      if (!studentId || !model.gradeCourseId || !Number.isInteger(value)) {
+        return { model: { ...model, error: "Select a course and enter a whole-number grade." } };
       }
       return {
-        model: { ...model, status: "loading" },
-        commands: [recordGradeCmd(model.selectedStudentId, message.value, message.course)],
+        model: { ...model, status: "loading", error: null },
+        commands: [RecordGrade({ studentId, courseId: model.gradeCourseId, value })],
       };
-
-    case "StudentAdded":
+    }
+    case "DataLoaded":
+      return {
+        model: {
+          ...model,
+          students: message.students,
+          courses: message.courses,
+          status: "idle",
+          error: null,
+        },
+      };
+    case "GradesLoaded":
+      return { model: { ...model, grades: message.grades, status: "idle", error: null } };
+    case "StudentCreated":
       return {
         model: {
           ...model,
           students: [...model.students, message.student],
-          newStudentName: "",
-          newStudentEmail: "",
+          selectedStudentId: message.student.id,
+          grades: [],
+          studentName: "",
+          studentEmail: "",
+          status: "idle",
+          error: null,
+        },
+        commands: [LoadGrades({ studentId: message.student.id })],
+      };
+    case "CourseCreated":
+      return {
+        model: {
+          ...model,
+          courses: [...model.courses, message.course],
+          courseName: "",
+          courseCode: "",
+          gradeCourseId: message.course.id,
           status: "idle",
           error: null,
         },
       };
-
-    case "GradeRecorded":
+    case "GradeCreated":
       return {
         model: {
           ...model,
           grades: [...model.grades, message.grade],
-          newGradeValue: null,
-          newGradeCourse: null,
+          gradeValue: "",
           status: "idle",
           error: null,
         },
       };
-
     case "OperationFailed":
       return { model: { ...model, status: "idle", error: message.message } };
   }
 };
 
-// --- View ---
-
-const studentRow = (student: Student, selected: boolean, onSelect: () => AppMessage) => {
-  return html.tr(
-    { class: selected ? "bg-gray-100" : "", onclick: onSelect },
-    html.td({}, text(student.name)),
-    html.td({}, text(student.email)),
-    html.td({}, text("0"))
-  );
-};
-
-export const view: View.View<AppModel, AppMessage> = (model) => {
-  const selectedStudent = model.students.find((s) => s.id === model.selectedStudentId);
-
-  return html.div({ class: "p-4 max-w-2xl mx-auto font-sans" }, [
-    html.h1({}, text("Student Grade Management System")),
-
-    html.div({ class: "mb-6 p-4 border rounded" }, [
-      html.h2({}, text("Add Student")),
-      html.div({ class: "flex gap-2" }, [
-        html.input({
-          type: "text",
-          placeholder: "Name",
-          value: model.newStudentName,
-          oninput: (e) => ({ type: "SetNewStudentName", value: (e.target as HTMLInputElement).value }),
-        }),
-        html.input({
-          type: "email",
-          placeholder: "Email",
-          value: model.newStudentEmail,
-          oninput: (e) => ({ type: "SetNewStudentEmail", value: (e.target as HTMLInputElement).value }),
-        }),
-        html.button({
-          onclick: () => ({ type: "AddStudent", name: model.newStudentName, email: model.newStudentEmail }),
-          disabled: !model.newStudentName || !model.newStudentEmail,
-        }, text("Add")),
+export const view = (model: AppModel, h: HtmlBuilder<AppMessage>) => ({
+  title: "Student Grade Management System",
+  body: h.div([h.Class("app")], [
+    h.h1([], ["Student Grade Management System"]),
+    h.p([], ["Students, courses, and grades are stored in SQLite."]),
+    h.section([], [
+      h.h2([], ["Add student"]),
+      h.input([
+        h.Type("text"),
+        h.Placeholder("Name"),
+        h.Value(model.studentName),
+        h.OnInput((value) => Message.StudentNameChanged({ value })),
       ]),
+      h.input([
+        h.Type("email"),
+        h.Placeholder("Email"),
+        h.Value(model.studentEmail),
+        h.OnInput((value) => Message.StudentEmailChanged({ value })),
+      ]),
+      h.button([
+        h.OnClick(Message.AddStudentClicked()),
+        h.Disabled(!model.studentName.trim() || !model.studentEmail.trim()),
+      ], ["Add student"]),
     ]),
-
-    html.div({ class: "mb-6" }, [
-      html.h2({}, text("Students")),
-      html.table({ class: "border-collapse w-full" }, [
-        html.thead({}, [
-          html.tr({}, [
-            html.th({}, text("Name")),
-            html.th({}, text("Email")),
-            html.th({}, text("Grades")),
+    h.section([], [
+      h.h2([], ["Add course"]),
+      h.input([
+        h.Type("text"),
+        h.Placeholder("Course name"),
+        h.Value(model.courseName),
+        h.OnInput((value) => Message.CourseNameChanged({ value })),
+      ]),
+      h.input([
+        h.Type("text"),
+        h.Placeholder("Course code"),
+        h.Value(model.courseCode),
+        h.OnInput((value) => Message.CourseCodeChanged({ value })),
+      ]),
+      h.button([
+        h.OnClick(Message.AddCourseClicked()),
+        h.Disabled(!model.courseName.trim() || !model.courseCode.trim()),
+      ], ["Add course"]),
+    ]),
+    h.section([], [
+      h.h2([], ["Students"]),
+      h.ul([], model.students.map((student) =>
+        h.li([], [
+          h.button([
+            h.OnClick(Message.StudentSelected({ id: student.id })),
+            h.AriaPressed(model.selectedStudentId === student.id ? "true" : "false"),
+          ], [`${student.name} (${student.email})`]),
+        ])
+      )),
+    ]),
+    model.selectedStudentId
+      ? h.section([], [
+          h.h2([], ["Record grade"]),
+          h.select([
+            h.Value(model.gradeCourseId),
+            h.OnChange((value) => Message.GradeCourseChanged({ value })),
+          ], [
+            h.option([h.Value("")], ["Choose course"]),
+            ...model.courses.map((course) =>
+              h.option([h.Value(course.id)], [`${course.code} — ${course.name}`])
+            ),
           ]),
-        ]),
-        html.tbody({},
-          model.students.map((s) =>
-            studentRow(s, s.id === model.selectedStudentId, () => ({ type: "SelectStudent", id: s.id }))
-          )
-        ),
-      ]),
-    ]),
-
-    selectedStudent && (
-      html.div({ class: "mb-6 p-4 border rounded" }, [
-        html.h2({}, text(`Record Grade — ${selectedStudent.name}`)),
-        html.div({ class: "flex gap-2" }, [
-          html.input({
-            type: "number",
-            placeholder: "Value (0-100)",
-            value: model.newGradeValue ?? "",
-            oninput: (e) => ({ type: "SetNewGradeValue", value: (e.target as HTMLInputElement).value }),
-          }),
-          html.input({
-            type: "text",
-            placeholder: "Course",
-            value: model.newGradeCourse ?? "",
-            oninput: (e) => ({ type: "SetNewGradeCourse", value: (e.target as HTMLInputElement).value }),
-          }),
-          html.button({
-            onclick: () => {
-              const value = model.newGradeValue ? parseFloat(model.newGradeValue) : NaN;
-              if (isNaN(value) || !model.newGradeCourse) return { type: "SetNewStudentName", value: "" };
-              return { type: "RecordGrade", value, course: model.newGradeCourse };
-            },
-            disabled: !model.newGradeValue || !model.newGradeCourse,
-          }, text("Record")),
-        ]),
-      ])
-    ),
-
-    model.status === "loading" && html.p({}, text("Processing...")),
-    model.error && html.p({ class: "text-red-500" }, text(model.error)),
-
-    html.div({}, [
-      html.h2({}, text("Grades")),
-      html.table({ class: "border-collapse w-full" }, [
-        html.thead({}, [
-          html.tr({}, [
-            html.th({}, text("Student")),
-            html.th({}, text("Course")),
-            html.th({}, text("Value")),
-            html.th({}, text("Letter")),
+          h.input([
+            h.Type("number"),
+            h.Placeholder("Grade (0-100)"),
+            h.Value(model.gradeValue),
+            h.OnInput((value) => Message.GradeValueChanged({ value })),
           ]),
-        ]),
-        html.tbody({},
-          model.grades.map((g) =>
-            html.tr({}, [
-              html.td({}, text(g.studentId.slice(0, 8))),
-              html.td({}, text(g.courseId)),
-              html.td({}, text(g.value.toString())),
-              html.td({}, text(g.letter ?? "-")),
-            ])
-          )
-        ),
-      ]),
-    ]),
-  ]);
-};
-
-// --- Program ---
-
-export const program = Program.program({
-  model: initialModel,
-  update,
-  view,
+          h.button([
+            h.OnClick(Message.RecordGradeClicked()),
+            h.Disabled(!model.gradeCourseId || !model.gradeValue),
+          ], ["Record grade"]),
+          h.h2([], ["Grades"]),
+          h.ul([], model.grades.map((grade) => {
+            const course = model.courses.find((item) => item.id === grade.courseId);
+            return h.li([], [
+              `${course?.code ?? "Course"}: ${grade.value} (${grade.letter ?? "-"})`,
+            ]);
+          })),
+        ])
+      : h.p([], ["Select a student to view and record grades."]),
+    model.status === "loading" ? h.p([], ["Loading…"]) : null,
+    model.error ? h.p([h.Class("error"), h.Role("alert")], [model.error]) : null,
+  ]),
 });

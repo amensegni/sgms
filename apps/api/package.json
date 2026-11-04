@@ -1,0 +1,27 @@
+{
+  "name": "@sgms/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "oxlint src"
+  },
+  "dependencies": {
+    "@prisma/adapter-better-sqlite3": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "@sgms/core": "workspace:*",
+    "effect": "^4.1.2"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.1.2",
+    "@types/node": "^26.6.6",
+    "oxlint": "1.88.0",
+    "tsx": "^4.20.6",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

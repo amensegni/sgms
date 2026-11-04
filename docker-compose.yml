@@ -4,7 +4,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=sqlite:./data/sgms.sqlite
+      - DATABASE_URL=file:/data/sgms.sqlite
     volumes:
       - sgms-data:/data
 

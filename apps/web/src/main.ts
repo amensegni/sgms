@@ -1,5 +1,11 @@
-import { Runtime } from "@effect/platform-browser";
-import { program } from "./app";
+import { Runtime } from "foldkit";
+import { AppModelSchema, init, update, view } from "./app";
 
-const runtime = Runtime.make();
-Runtime.runMain(runtime)(program);
+const application = Runtime.makeApplication({
+  Model: AppModelSchema,
+  init,
+  update,
+  view,
+  container: document.getElementById("app"),
+});
+Runtime.run(application);

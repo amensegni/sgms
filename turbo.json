@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "pipeline": {
+  "tasks": {
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**"]
@@ -9,13 +9,14 @@
       "dependsOn": ["^check"]
     },
     "test": {
-      "dependsOn": ["^test"]
+      "dependsOn": ["^build", "^test"]
     },
     "lint": {
       "dependsOn": ["^lint"]
     },
     "dev": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": ["DATABASE_URL", "PORT"]
     }
   }
 }

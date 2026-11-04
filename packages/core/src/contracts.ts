@@ -4,9 +4,9 @@ import { Effect, Schema } from "effect";
 
 export interface Contract<
   Name extends string,
-  Input extends Schema.Schema.Type<any, any, any>,
-  Output extends Schema.Schema.Type<any, any, any>,
-  Failure extends Schema.Schema.Type<any, any, any> | never = never,
+  Input extends Schema.Schema<unknown>,
+  Output extends Schema.Schema<unknown>,
+  Failure extends Schema.Schema<unknown>,
 > {
   readonly name: Name;
   readonly input: Input;
@@ -22,9 +22,9 @@ export interface Contract<
 
 export function defineContract<
   Name extends string,
-  Input extends Schema.Schema<any, any, any>,
-  Output extends Schema.Schema<any, any, any>,
-  Failure extends Schema.Schema<any, any, any> | never = never,
+  Input extends Schema.Schema<unknown>,
+  Output extends Schema.Schema<unknown>,
+  Failure extends Schema.Schema<unknown>,
 >(
   name: Name,
   opts: {
@@ -53,10 +53,27 @@ export function defineContract<
   };
 }
 
-export function implement<Name extends string, Input, Output, Failure>(
-  contract: Contract<Name, any, any, Failure>,
-  handler: (input: Input) => Effect.Effect<Output, Failure, never>,
-) {
+export function implement<
+  Name extends string,
+  Input extends Schema.Schema<unknown>,
+  Output extends Schema.Schema<unknown>,
+  Failure extends Schema.Schema<unknown>,
+  R = never,
+>(
+  contract: Contract<Name, Input, Output, Failure>,
+  handler: (input: Schema.Schema.Type<Input>) => Effect.Effect<
+    Schema.Schema.Type<Output>,
+    Schema.Schema.Type<Failure>,
+    R
+  >,
+): {
+  readonly contract: Contract<Name, Input, Output, Failure>;
+  readonly handler: (input: Schema.Schema.Type<Input>) => Effect.Effect<
+    Schema.Schema.Type<Output>,
+    Schema.Schema.Type<Failure>,
+    R
+  >;
+} {
   return { contract, handler };
 }
 
@@ -82,20 +99,30 @@ export class DuplicateStudent extends Schema.TaggedError<DuplicateStudent>()(
   { email: Schema.String }
 ) {}
 
+export class DuplicateCourse extends Schema.TaggedError<DuplicateCourse>()(
+  "DuplicateCourse",
+  { code: Schema.String }
+) {}
+
 export class InvalidGrade extends Schema.TaggedError<InvalidGrade>()(
   "InvalidGrade",
   { value: Schema.Number, reason: Schema.String }
 ) {}
 
+export class PersistenceError extends Schema.TaggedError<PersistenceError>()(
+  "PersistenceError",
+  { operation: Schema.String, message: Schema.String }
+) {}
+
 // --- Schemas ---
 
-export const StudentId = Schema.String.brand("StudentId");
+export const StudentId = Schema.brand("StudentId")(Schema.String);
 export type StudentId = typeof StudentId.Type;
 
-export const CourseId = Schema.String.brand("CourseId");
+export const CourseId = Schema.brand("CourseId")(Schema.String);
 export type CourseId = typeof CourseId.Type;
 
-export const GradeId = Schema.String.brand("GradeId");
+export const GradeId = Schema.brand("GradeId")(Schema.String);
 export type GradeId = typeof GradeId.Type;
 
 export const StudentSchema = Schema.Struct({
@@ -130,12 +157,24 @@ export const createStudentContract = defineContract("createStudent", {
     destructive: false,
   },
   description: "Register a new student",
-  failure: DuplicateStudent,
+  failure: Schema.Union([DuplicateStudent, PersistenceError]),
   input: Schema.Struct({
     name: Schema.String,
     email: Schema.String,
   }),
   output: StudentSchema,
+});
+
+export const listStudentsContract = defineContract("listStudents", {
+  annotations: {
+    idempotent: true,
+    readOnly: true,
+    destructive: false,
+  },
+  description: "List registered students",
+  failure: PersistenceError,
+  input: Schema.Struct({}),
+  output: Schema.Array(StudentSchema),
 });
 
 export const getStudentContract = defineContract("getStudent", {
@@ -145,7 +184,7 @@ export const getStudentContract = defineContract("getStudent", {
     destructive: false,
   },
   description: "Look up a student by id",
-  failure: StudentNotFound,
+  failure: Schema.Union([StudentNotFound, PersistenceError]),
   input: Schema.Struct({
     id: StudentId,
   }),
@@ -159,12 +198,24 @@ export const createCourseContract = defineContract("createCourse", {
     destructive: false,
   },
   description: "Create a new course",
-  failure: Schema.String,
+  failure: Schema.Union([DuplicateCourse, PersistenceError]),
   input: Schema.Struct({
     name: Schema.String,
     code: Schema.String,
   }),
   output: CourseSchema,
+});
+
+export const listCoursesContract = defineContract("listCourses", {
+  annotations: {
+    idempotent: true,
+    readOnly: true,
+    destructive: false,
+  },
+  description: "List available courses",
+  failure: PersistenceError,
+  input: Schema.Struct({}),
+  output: Schema.Array(CourseSchema),
 });
 
 export const recordGradeContract = defineContract("recordGrade", {
@@ -174,7 +225,12 @@ export const recordGradeContract = defineContract("recordGrade", {
     destructive: false,
   },
   description: "Record a grade for a student in a course",
-  failure: InvalidGrade,
+  failure: Schema.Union([
+    StudentNotFound,
+    CourseNotFound,
+    InvalidGrade,
+    PersistenceError,
+  ]),
   input: Schema.Struct({
     studentId: StudentId,
     courseId: CourseId,
@@ -192,7 +248,7 @@ export const getGradesForStudentContract = defineContract(
       destructive: false,
     },
     description: "List all grades for a student",
-    failure: StudentNotFound,
+    failure: Schema.Union([StudentNotFound, PersistenceError]),
     input: Schema.Struct({
       studentId: StudentId,
     }),

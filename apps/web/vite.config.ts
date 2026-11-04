@@ -1,8 +1,13 @@
 import { defineConfig } from "vite";
-import { foldkitPlugin } from "@foldkit/vite-plugin";
+import { foldkit } from "@foldkit/vite-plugin";
 
 export default defineConfig({
-  plugins: [foldkitPlugin()],
+  plugins: [foldkit()],
+  server: {
+    proxy: {
+      "/api": "http://localhost:3000",
+    },
+  },
   build: {
     outDir: "dist",
   },

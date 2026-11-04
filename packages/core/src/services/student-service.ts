@@ -1,67 +1,38 @@
-import { Context, Effect, Layer, Schedule } from "effect";
-import { Schema } from "effect";
+import { Context, Effect, Layer } from "effect";
 import {
-  createStudentContract,
-  getStudentContract,
   DuplicateStudent,
-  StudentNotFound,
+  PersistenceError,
   Student,
+  StudentNotFound,
   StudentId,
-} from "../contracts";
+} from "../contracts.js";
+import { StudentRepository } from "./repositories.js";
 
-// --- Service interface ---
-
-class StudentService extends Context.Service("StudentService")() {
-  create = (input: { name: string; email: string }) =>
-    Effect.gen(function* () {
-      const students = yield* StudentStore;
-      const existing = yield* Effect.promise(() =>
-        students.find((s) => s.email === input.email)
-      );
-      if (existing) {
-        yield* Effect.fail(new DuplicateStudent({ email: input.email }));
-      }
-      const id: StudentId = crypto.randomUUID();
-      const student: Student = { id, name: input.name, email: input.email };
-      yield* Effect.promise(() => students.push(student));
-      return student;
-    });
-
-  get = (input: { id: StudentId }) =>
-    Effect.gen(function* () {
-      const students = yield* StudentStore;
-      const student = yield* Effect.promise(() =>
-        students.find((s) => s.id === input.id)
-      );
-      if (!student) {
-        yield* Effect.fail(new StudentNotFound({ id: input.id }));
-      }
-      return student;
-    });
-}
-
-// --- In-memory store (port boundary; adapter replaces this) ---
-
-class StudentStore extends Context.Tag("StudentStore")<
-  StudentStore,
-  { items: Student[]; find: (pred: (s: Student) => unknown) => Promise<Student | undefined>; push: (s: Student) => Promise<void> }
->() {}
-
-// --- Layer ---
+export class StudentService extends Context.Service<StudentService, {
+  create: (input: { name: string; email: string }) => Effect.Effect<Student, DuplicateStudent | PersistenceError>;
+  list: () => Effect.Effect<readonly Student[], PersistenceError>;
+  get: (input: { id: StudentId }) => Effect.Effect<Student, StudentNotFound | PersistenceError>;
+}>()("StudentService") {}
 
 export const StudentServiceLayer = Layer.effect(
   StudentService,
   Effect.gen(function* () {
-    const store = yield* StudentStore;
-    return new StudentService({ store });
+    const repository = yield* StudentRepository;
+    return {
+      create: (input: { name: string; email: string }) =>
+        repository.create({
+          name: input.name.trim(),
+          email: input.email.trim().toLowerCase(),
+        }),
+      list: () => repository.list(),
+      get: (input: { id: StudentId }) =>
+        Effect.gen(function* () {
+          const student = yield* repository.findById(input.id);
+          if (!student) {
+            return yield* Effect.fail(new StudentNotFound({ id: input.id }));
+          }
+          return student;
+        }),
+    };
   })
-);
-
-export const StudentStoreLayer = Layer.succeed(
-  StudentStore,
-  {
-    items: [],
-    find: (pred) => Promise.resolve(([] as Student[]).find(pred)),
-    push: (s) => Promise.resolve(),
-  }
 );

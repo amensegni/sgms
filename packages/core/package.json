@@ -1,6 +1,7 @@
 {
   "name": "@sgms/core",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,7 +21,6 @@
     "effect": "^4.1.2"
   },
   "devDependencies": {
-    "@effect/tsgo": "0.55.0",
     "@effect/vitest": "4.1.2",
     "oxlint": "1.88.0",
     "typescript": "7.0.2",
