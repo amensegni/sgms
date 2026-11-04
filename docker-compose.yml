@@ -1,0 +1,12 @@
+services:
+  sgms:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=sqlite:./data/sgms.sqlite
+    volumes:
+      - sgms-data:/data
+
+volumes:
+  sgms-data:
