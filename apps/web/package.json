@@ -9,12 +9,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "effect": "^4.0.0",
+    "effect": "^4.1.2",
     "foldkit": "^0.170.0"
   },
   "devDependencies": {
+    "@foldkit/vite-plugin": "^0.29.0",
     "typescript": "7.0.2",
-    "vite": "^8.3.4",
-    "@foldkit/vite-plugin": "^0.29.0"
+    "vite": "^8.3.5"
   }
 }
