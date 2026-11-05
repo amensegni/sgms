@@ -24,5 +24,7 @@ jobs:
         run: corepack enable && corepack prepare pnpm@11.3.0 --activate
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Generate Prisma Client
+        run: pnpm run db:generate
       - name: Check and test
         run: pnpm turbo run check test build --concurrency=1
