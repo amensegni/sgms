@@ -11,13 +11,14 @@
     "pnpm": ">=11.3.0"
   },
   "scripts": {
-    "dev": "pnpm run db:migrate && turbo run dev --parallel",
+    "dev": "pnpm run db:migrate && pnpm run db:seed && turbo run dev --parallel",
     "build": "pnpm run db:generate && turbo run build",
     "check": "pnpm run db:generate && turbo run check",
     "test": "pnpm run db:generate && turbo run test",
     "lint": "turbo run lint",
     "db:generate": "prisma generate",
-    "db:migrate": "pnpm run db:generate && prisma migrate deploy"
+    "db:migrate": "pnpm run db:generate && prisma migrate deploy",
+    "db:seed": "pnpm --filter @sgms/api exec tsx ../../prisma/seed.ts"
   },
   "devDependencies": {
     "@prisma/client": "7.10.1",

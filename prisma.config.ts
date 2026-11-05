@@ -1,4 +1,5 @@
 import { defineConfig } from "prisma/config";
+import { resolveDatabaseUrl } from "./apps/api/src/database-url.ts";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -6,6 +7,6 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env.DATABASE_URL ?? "file:./dev.sqlite",
+    url: resolveDatabaseUrl(process.env.DATABASE_URL),
   },
 });

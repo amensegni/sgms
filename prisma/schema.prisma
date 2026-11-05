@@ -7,25 +7,92 @@ datasource db {
 }
 
 model Student {
-  id     String @id @default(cuid())
-  name   String
-  email  String @unique
-  grades Grade[]
+  id          String       @id @default(cuid())
+  name        String
+  email       String       @unique
+  grades      Grade[]
+  enrollments Enrollment[]
 }
 
 model Course {
-  id     String @id @default(cuid())
-  name   String
-  code   String @unique
-  grades Grade[]
+  id          String       @id @default(cuid())
+  name        String
+  code        String       @unique
+  teacherId   String?
+  teacher     Teacher?     @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  grades      Grade[]
+  sections    Section[]
+  assessments Assessment[]
+  enrollments Enrollment[]
 }
 
 model Grade {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   value     Int
   letter    String?
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
   studentId String
-  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
   courseId  String
+}
+
+model Teacher {
+  id      String   @id @default(cuid())
+  name    String
+  email   String   @unique
+  courses Course[]
+}
+
+model Section {
+  id          String       @id @default(cuid())
+  name        String
+  courseId    String
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  enrollments Enrollment[]
+
+  @@unique([id, courseId])
+  @@unique([courseId, name])
+}
+
+model Enrollment {
+  id        String             @id @default(cuid())
+  studentId String
+  student   Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  sectionId String
+  section   Section            @relation(fields: [sectionId, courseId], references: [id, courseId], onDelete: Cascade)
+  courseId  String
+  course    Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  results   AssessmentResult[]
+
+  @@unique([studentId, sectionId])
+  @@unique([id, courseId])
+  @@index([courseId, sectionId])
+}
+
+model Assessment {
+  id         String             @id @default(cuid())
+  courseId   String
+  course     Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  category   String
+  title      String
+  maxScore   Int
+  occurredAt DateTime
+  results    AssessmentResult[]
+
+  @@unique([id, courseId])
+  @@unique([courseId, category, title, occurredAt])
+  @@index([courseId, category, occurredAt])
+}
+
+model AssessmentResult {
+  id           String     @id @default(cuid())
+  courseId     String
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId, courseId], references: [id, courseId], onDelete: Cascade)
+  enrollmentId String
+  enrollment   Enrollment @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Cascade)
+  score        Int
+
+  @@unique([assessmentId, enrollmentId])
+  @@index([enrollmentId])
 }

@@ -19,6 +19,7 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/apps/api/src/database-url.ts ./apps/api/src/database-url.ts
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
@@ -27,4 +28,4 @@ COPY --from=builder /app/packages/core/package.json ./packages/core/package.json
 COPY --from=builder /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=builder /app/packages/core/dist ./packages/core/dist
 EXPOSE 3000
-CMD ["sh", "-c", "pnpm exec prisma migrate deploy && node apps/api/dist/server.js"]
+CMD ["sh", "-c", "pnpm exec prisma migrate deploy && pnpm run db:seed && node apps/api/dist/server.js"]

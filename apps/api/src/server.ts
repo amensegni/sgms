@@ -4,21 +4,35 @@ import { extname, resolve, sep } from "node:path";
 import { Layer, ManagedRuntime, Schema } from "effect";
 import {
   CourseNotFound,
+  CourseGradebookServiceLayer,
   DuplicateCourse,
   DuplicateStudent,
+  DuplicateExam,
+  GradebookCourseNotFound,
+  InvalidAssessment,
+  InvalidAssessmentScore,
   InvalidGrade,
   PersistenceError,
+  AssessmentNotFound,
   StudentNotFound,
+  StudentNotEnrolled,
+  TeacherNotFound,
+  createAssessment,
+  createAssessmentContract,
   createCourse,
   createCourseContract,
   createStudent,
   createStudentContract,
   getGradesForStudent,
   getGradesForStudentContract,
+  getTeacherDashboard,
+  getTeacherDashboardContract,
   listCourses,
   listStudents,
   recordGrade,
   recordGradeContract,
+  recordAssessmentResult,
+  recordAssessmentResultContract,
   listCoursesContract,
   listStudentsContract,
   StudentServiceLayer,
@@ -26,15 +40,17 @@ import {
   GradeServiceLayer,
 } from "@sgms/core";
 import { makePrismaRepositoryLayer } from "./database.js";
+import { resolveDatabaseUrl } from "./database-url.js";
 
-const databaseUrl = process.env.DATABASE_URL ?? "file:./dev.sqlite";
+const databaseUrl = resolveDatabaseUrl(process.env.DATABASE_URL);
 const port = Number(process.env.PORT ?? 3000);
 const webRoot = resolve(process.cwd(), "apps/web/dist");
 const repositories = makePrismaRepositoryLayer(databaseUrl);
 const applicationLayer = Layer.mergeAll(
   StudentServiceLayer,
   CourseServiceLayer,
-  GradeServiceLayer
+  GradeServiceLayer,
+  CourseGradebookServiceLayer
 ).pipe(Layer.provideMerge(repositories.layer));
 const runtime = ManagedRuntime.make(applicationLayer);
 
@@ -85,6 +101,18 @@ const handleFailure = (response: ServerResponse, cause: unknown) => {
   }
   if (cause instanceof StudentNotFound || cause instanceof CourseNotFound) {
     sendJson(response, 404, { error: cause._tag });
+    return;
+  }
+  if (cause instanceof TeacherNotFound || cause instanceof GradebookCourseNotFound || cause instanceof AssessmentNotFound) {
+    sendJson(response, 404, { error: cause._tag });
+    return;
+  }
+  if (cause instanceof DuplicateExam || cause instanceof StudentNotEnrolled) {
+    sendJson(response, 409, { error: cause._tag });
+    return;
+  }
+  if (cause instanceof InvalidAssessment || cause instanceof InvalidAssessmentScore) {
+    sendJson(response, 400, { error: cause._tag, message: cause.reason });
     return;
   }
   if (cause instanceof InvalidGrade) {
@@ -142,6 +170,40 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse) => 
       const input = decodeRequest(recordGradeContract.input, await readJson(request));
       const grade = await runtime.runPromise(recordGrade.handler(input));
       sendJson(response, 201, grade);
+      return;
+    }
+    const dashboardMatch = /^\/api\/teachers\/([^/]+)\/dashboard$/.exec(url.pathname);
+    if (method === "GET" && dashboardMatch) {
+      const input = decodeRequest(getTeacherDashboardContract.input, {
+        teacherId: decodeURIComponent(dashboardMatch[1]!),
+      });
+      const dashboard = await runtime.runPromise(getTeacherDashboard.handler(input));
+      sendJson(response, 200, dashboard);
+      return;
+    }
+    const assessmentsMatch = /^\/api\/courses\/([^/]+)\/assessments$/.exec(url.pathname);
+    if (method === "POST" && assessmentsMatch) {
+      const body = await readJson(request);
+      const input = decodeRequest(createAssessmentContract.input, {
+        ...(typeof body === "object" && body !== null ? body : {}),
+        teacherId: "bits-demo-teacher",
+        courseId: decodeURIComponent(assessmentsMatch[1]!),
+      });
+      const assessment = await runtime.runPromise(createAssessment.handler(input));
+      sendJson(response, 201, assessment);
+      return;
+    }
+    const resultMatch = /^\/api\/assessments\/([^/]+)\/results\/([^/]+)$/.exec(url.pathname);
+    if (method === "PUT" && resultMatch) {
+      const body = await readJson(request);
+      const input = decodeRequest(recordAssessmentResultContract.input, {
+        ...(typeof body === "object" && body !== null ? body : {}),
+        teacherId: "bits-demo-teacher",
+        assessmentId: decodeURIComponent(resultMatch[1]!),
+        studentId: decodeURIComponent(resultMatch[2]!),
+      });
+      const result = await runtime.runPromise(recordAssessmentResult.handler(input));
+      sendJson(response, 200, result);
       return;
     }
     sendJson(response, 404, { error: "NotFound" });

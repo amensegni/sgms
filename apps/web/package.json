@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@sgms/core": "workspace:*",
     "effect": "^4.0.0",
     "foldkit": "^0.170.0"
   },
